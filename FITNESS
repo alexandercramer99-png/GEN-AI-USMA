@@ -1,0 +1,263 @@
+<!--
+Cadet Fitness Assistant - Standalone Webpage
+
+FILES INCLUDED IN THIS SINGLE HTML FOR EASE OF DEPLOYMENT:
+1) index.html (this file) - contains frontend chat UI and instructions
+2) Serverless function example (Node) is included below inside a comment block. Deploy this on Vercel/Netlify (recommended) and set environment var OPENAI_API_KEY.
+
+Deployment steps summary:
+- Upload this file as index.html to a public GitHub repo and enable GitHub Pages (branch: main, /root)
+- Deploy the serverless function (example provided) to Vercel/Netlify or any server that can securely store your OpenAI API key.
+- Update `API_ENDPOINT` in the script below to point to your deployed serverless endpoint (e.g. https://your-deploy.vercel.app/api/chat)
+
+IMPORTANT: Do NOT put your OpenAI API key directly into this file. Keep it on the serverless function only.
+
+ASSISTANT SYSTEM PROMPT (already embedded in requests to the serverless endpoint):
+- The assistant is a fitness helper for Cadets at the United States Military Academy (West Point).
+- Always assume cadets have early wakeups, heavy academics, limited downtime, and only 2 hours/day to train (gym + running).
+- Advice must fit trainings in Arvin Gym or outdoor running, prioritize ACFT/APFT, injury prevention, progressive overload, and realistic cadet schedules.
+- Tone: motivational, realistic, efficient. Reference the "2-hour limit" and West Point constraints in answers.
+-->
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cadet Fitness Assistant — West Point</title>
+  <style>
+        body {
+            background: #0d0d0d url('https://images.unsplash.com/photo-1604152135912-04a022e23696?auto=format&fit=crop&w=1600&q=80') no-repeat center center fixed;
+            background-size: cover;
+            font-family: 'Arial', sans-serif;
+            color: #f1f1f1;
+            padding: 0;
+            margin: 0;
+        }
+        .app-container {
+            backdrop-filter: blur(6px);
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 900px;
+            margin: 40px auto;
+            box-shadow: 0 0 25px rgba(0,0,0,0.7);
+            border: 2px solid #3a3a3a;
+        }
+        h1 {
+            text-align: center;
+            color: #ffe600;
+            font-size: 2.5rem;
+            text-shadow: 0 0 10px #000;
+        }
+        .banner-img {
+            width: 100%;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.6);
+        }
+        .chat-box {
+            height: 350px;
+            overflow-y: auto;
+            border: 1px solid #555;
+            padding: 10px;
+            background: rgba(20,20,20,0.8);
+            border-radius: 8px;
+        }
+        .msg-user { color: #82c7ff; margin-bottom: 8px; }
+        .msg-bot { color: #a0ff8f; margin-bottom: 8px; }
+        input, button {
+            background: #111;
+            border: 1px solid #666;
+            padding: 10px;
+            color: #f1f1f1;
+            border-radius: 6px;
+        }
+        button {
+            cursor: pointer;
+            background: #ffe600;
+            color: #000;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #fff176;
+        }
+    </style>)</label><body>
+    <img class="banner-img" src="https://images.unsplash.com/photo-1540497077202-7c8a7cbf4247?auto=format&fit=crop&w=1600&q=80" alt="Soldiers Training">
+         <input id="avail" value="120" />
+          <div class="small">Enter minutes (default 120). Assistant will always reference the 2-hour cadet limit.</div>
+
+          <label for="env">Training environment</label>
+          <select id="env"><option>Arvin Gym</option><option>Outdoor running</option></select>
+
+          <label for="injury">Injury / restrictions</label>
+          <input id="injury" placeholder="e.g., knee pain, none" />
+
+          <button class="primary" id="applyProfile">Apply Profile</button>
+
+          <div style="margin-top:14px">
+            <div class="meta">Quick prompts</div>
+            <button class="preset-btn" data-prompt="Design a 45-min gym workout for lower-body strength that fits a cadet's 2-hour daily limit and supports the ACFT deadlift.">Lower-body strength (45 min)</button>
+            <button class="preset-btn" data-prompt="I need a 30-minute speed workout to improve my 2-mile time that fits before morning formation and limits fatigue for class.">30-min run speed session</button>
+            <button class="preset-btn" data-prompt="How should I split 2 hours between gym and a run this week to improve my endurance and protect my knees?">Split gym + run</button>
+          </div>
+        </div>
+
+        <div class="hint">Notes: This assistant assumes cadets have early wakeups and heavy academics. All plans constrain training to 2 hours/day and use Arvin Gym or outdoor running.</div>
+      </aside>
+
+      <section class="chat">
+        <div class="msgs" id="msgs"></div>
+
+        <div class="inputbar">
+          <input id="query" placeholder="Ask the Cadet Fitness Assistant... (e.g., 'How do I get faster for the 2-mile?')" />
+          <button id="sendBtn" class="primary">Ask</button>
+        </div>
+      </section>
+    </main>
+
+    <div class="footer-note">
+      This page requires a small server endpoint to proxy requests to OpenAI securely. See the instructions in the page comments. <span class="small">(Do not commit your OpenAI key to GitHub.)</span>
+    </div>
+  </div>
+
+  <script>
+    // ====== CONFIG: update API_ENDPOINT after you deploy the serverless function ======
+    let API_ENDPOINT = 'https://YOUR_SERVERLESS_ENDPOINT_HERE/api/chat';
+    // ==================================================================================
+
+    const msgsEl = document.getElementById('msgs');
+    const queryEl = document.getElementById('query');
+    const sendBtn = document.getElementById('sendBtn');
+
+    function appendMessage(text, from='bot'){
+      const div = document.createElement('div');
+      div.className = 'message ' + (from==='me' ? 'me' : 'bot');
+      div.innerHTML = '<div class="small">'+(from==='me' ? 'You' : 'Cadet Assistant')+'</div><div style="white-space:pre-wrap">'+escapeHtml(text)+'</div>';
+      msgsEl.appendChild(div);
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+    }
+
+    function escapeHtml(s){ return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+    async function send(query){
+      if(!query) return;
+      appendMessage(query,'me');
+      appendMessage('Thinking — generating a response tailored to West Point cadets...','bot');
+
+      // Build a rich request with the cadet system prompt
+      const profile = {
+        goal: document.getElementById('ptype').value,
+        available_minutes: Number(document.getElementById('avail').value || 120),
+        env: document.getElementById('env').value,
+        injury: document.getElementById('injury').value || 'none'
+      };
+
+      try{
+        const res = await fetch(API_ENDPOINT, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            prompt: query,
+            profile
+          })
+        });
+
+        if(!res.ok){
+          const txt = await res.text();
+          throw new Error('Server error: '+res.status+' '+txt);
+        }
+
+        const data = await res.json();
+        // assume server returns { reply: '...' }
+        // Remove last placeholder 'Thinking' message and append real reply
+        // Remove last bot message (thinking)
+        const botMsgs = Array.from(msgsEl.querySelectorAll('.bot'));
+        if(botMsgs.length) botMsgs[botMsgs.length-1].remove();
+        appendMessage(data.reply || 'No reply received.');
+
+      }catch(err){
+        // Remove last placeholder bot message
+        const botMsgs = Array.from(msgsEl.querySelectorAll('.bot'));
+        if(botMsgs.length) botMsgs[botMsgs.length-1].remove();
+        appendMessage('Error: '+err.message,'bot');
+      }
+    }
+
+    sendBtn.addEventListener('click', ()=>{ send(queryEl.value); queryEl.value=''; queryEl.focus(); });
+    queryEl.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ send(queryEl.value); queryEl.value=''; } });
+
+    // Apply profile button
+    document.getElementById('applyProfile').addEventListener('click', ()=>{
+      appendMessage('Profile applied. I will design responses around the selected goal and the 2-hour limit.','bot');
+    });
+
+    // Preset buttons
+    document.querySelectorAll('.preset-btn').forEach(b=>{
+      b.addEventListener('click',()=>{ queryEl.value = b.dataset.prompt; queryEl.focus(); });
+    });
+
+    // Load a short welcome message
+    appendMessage("Welcome — I'm the Cadet Fitness Assistant. Tell me your goal or pick a quick prompt. I'll always assume a 2-hour/day training limit and West Point constraints.", 'bot');
+
+  </script>
+
+  <!--
+  ===================== Serverless function example (Node/Express for Vercel/Netlify) =====================
+
+  // Example for Vercel (api/chat.js)
+  // Save as api/chat.js and deploy to Vercel. Set environment variable OPENAI_API_KEY in project settings.
+
+  // const { OpenAI } = require('openai');
+  // const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+  // module.exports = async (req, res) => {
+  //   try {
+  //     const { prompt, profile } = req.body;
+  //     if(!prompt) return res.status(400).json({ error: 'no prompt' });
+
+  //     // System prompt tailored to West Point cadets (be concise but informative)
+  //     const system = `You are a fitness assistant for Cadets at the United States Military Academy at West Point. Always assume cadets have early wakeups, heavy academics, mandatory duties, and only 2 hours/day available for training (gym + running). Training should be limited to Arvin Gym or outdoor running, prioritize ACFT/APFT events, be time-efficient, safe, and realistic for a cadet schedule. Reference the 2-hour limit in answers. Tone: motivational, efficient, and safety-conscious.`;
+
+  //     const userContent = `Profile: ${JSON.stringify(profile || {})}\nUser: ${prompt}`;
+
+  //     const response = await openai.chat.completions.create({
+  //       model: 'gpt-4o-mini',
+  //       messages: [
+  //         { role: 'system', content: system },
+  //         { role: 'user', content: userContent }
+  //       ],
+  //       max_tokens: 700
+  //     });
+
+  //     const reply = response.choices?.[0]?.message?.content || 'Unable to generate reply.';
+  //     return res.json({ reply });
+  //   } catch (err) {
+  //     console.error(err);
+  //     return res.status(500).json({ error: err.message||String(err) });
+  //   }
+  // };
+
+  --------------------------------------------------------------------------------
+  // Example for Netlify Functions (netlify/functions/chat.js)
+
+  // const fetch = require('node-fetch');
+  // exports.handler = async function(event, context) {
+  //   try{
+  //     const body = JSON.parse(event.body);
+  //     const { prompt, profile } = body;
+  //     const system = `You are a fitness assistant for Cadets at the United States Military Academy at West Point. Always assume cadets have early wakeups, heavy academics, mandatory duties, and only 2 hours/day available for training (gym + running). Training should be limited to Arvin Gym or outdoor running, prioritize ACFT/APFT events, be time-efficient, safe, and realistic for a cadet schedule. Reference the 2-hour limit in answers. Tone: motivational, efficient, and safety-conscious.`;
+
+  //     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions',{ method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+process.env.OPENAI_API_KEY }, body:JSON.stringify({ model:'gpt-4o-mini', messages:[ {role:'system',content:system},{role:'user',content:`Profile: ${JSON.stringify(profile)}\nUser: ${prompt}`} ], max_tokens:700 }) });
+
+  //     const data = await openaiRes.json();
+  //     const reply = data.choices?.[0]?.message?.content || 'No reply.';
+  //     return { statusCode:200, body: JSON.stringify({ reply }) };
+  //   }catch(e){return { statusCode:500, body: JSON.stringify({ error: e.message }) }}
+
+  =====================================================================================
+  -->
+
+</body>
+</html>
